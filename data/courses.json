@@ -1,0 +1,26 @@
+[
+  {
+    "name": "Docker",
+    "teacher": "Alice Martin",
+    "room": "B204",
+    "time": "08:30"
+  },
+  {
+    "name": "Python",
+    "teacher": "Thomas Durand",
+    "room": "A102",
+    "time": "10:30"
+  },
+  {
+    "name": "Kubernetes",
+    "teacher": "Sophie Bernard",
+    "room": "B105",
+    "time": "14:00"
+  },
+  {
+    "name": "Git",
+    "teacher": "Karim Haddad",
+    "room": "A201",
+    "time": "09:00"
+  }
+]
