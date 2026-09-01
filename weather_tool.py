@@ -1,9 +1,7 @@
 import json
-from datetime import datetime
-from urllib import request, parse
+from pathlib import Path
 
-PARIS_LATITUDE = 48.8566
-PARIS_LONGITUDE = 2.3522
+DATA_PATH = Path(__file__).resolve().parent / "data" / "weather.json"
 
 
 def _weather_description(code: int) -> str:
@@ -40,52 +38,26 @@ def _weather_description(code: int) -> str:
     return mapping.get(code, "conditions variables")
 
 
-def _resolve_day_index(day: str) -> int:
-    normalized = (day or "").lower().replace("é", "e").replace("è", "e")
-    if "demain" in normalized or "tomorrow" in normalized:
-        return 1
-    if "aujourd" in normalized or "today" in normalized:
-        return 0
-    return 1
-
-
 def get_weather(day: str):
-    """Retourne une phrase décrivant la météo prévue à Paris pour le jour demandé."""
-    index = _resolve_day_index(day)
-    params = {
-        "latitude": PARIS_LATITUDE,
-        "longitude": PARIS_LONGITUDE,
-        "daily": "weather_code,temperature_2m_max,temperature_2m_min",
-        "timezone": "Europe/London",
-        "forecast_days": 3,
-    }
-    url = "https://api.open-meteo.com/v1/forecast?" + parse.urlencode({k: v for k, v in params.items()})
+    """Retourne la météo disponible localement dans le projet, sans aucune requête réseau."""
+    if not DATA_PATH.exists():
+        return "Aucune donnée météo locale n'est disponible dans le projet."
 
-    with request.urlopen(url, timeout=20) as response:
-        payload = json.load(response)
+    with open(DATA_PATH, encoding="utf-8") as f:
+        payload = json.load(f)
 
-    daily = payload.get("daily", {})
-    dates = daily.get("time", [])
-    weather_codes = daily.get("weather_code", [])
-    max_temps = daily.get("temperature_2m_max", [])
-    min_temps = daily.get("temperature_2m_min", [])
+    city_data = payload.get("Paris", {})
+    label = "demain" if "demain" in (day or "").lower() or "tomorrow" in (day or "").lower() else "aujourd'hui"
+    entry = city_data.get(label, city_data.get("aujourd'hui"))
 
-    if not dates:
-        return "Je n'ai pas accès aux prévisions météo pour Paris pour le moment."
+    if entry is None:
+        return "Je n'ai pas de prévision météo locale pour cette période."
 
-    if index >= len(dates):
-        index = len(dates) - 1
-
-    date_label = dates[index]
-    code = weather_codes[index] if index < len(weather_codes) else 0
-    max_temp = max_temps[index] if index < len(max_temps) else None
-    min_temp = min_temps[index] if index < len(min_temps) else None
+    code = entry.get("weather_code", 0)
+    max_temp = entry.get("temperature_2m_max")
+    min_temp = entry.get("temperature_2m_min")
+    date_label = entry.get("date", "")
     description = _weather_description(code)
-
-    if day and ("demain" in day.lower() or "tomorrow" in day.lower()):
-        label = "demain"
-    else:
-        label = "aujourd'hui"
 
     if max_temp is not None and min_temp is not None:
         return (

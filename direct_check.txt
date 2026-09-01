@@ -1,0 +1,3 @@
+warning: The `fitz` API is deprecated and will be removed in future. Use `import pymupdf` instead.
+True
+Aucun passage pertinent n'a ete trouve dans la documentation locale.

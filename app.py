@@ -211,11 +211,18 @@ def index():
     answer = ""
     current_question = ""
     if request.method == "POST":
-        current_question = request.form.get("question", "")
-        if current_question.strip():
-            answer = run_agent(current_question)
+        current_question = request.form.get("question", "").strip()
+        if current_question:
+            try:
+                answer = run_agent(current_question)
+            except Exception as e:
+                answer = f"Erreur lors du traitement : {str(e)}"
     return render_template_string(HTML_PAGE, answer=answer, current_question=current_question)
 
 
 if __name__ == "__main__":
-    app.run(debug=False, host="0.0.0.0", port=5000)
+    print("🚀 Démarrage du serveur Flask...")
+    print("📍 Adresse : http://127.0.0.1:5000")
+    print("🔒 Le serveur ne répond qu'aux questions basées sur les données locales du projet.")
+    print("⛔ Aucune réponse générale ou externe n'est fournie.")
+    app.run(debug=False, host="0.0.0.0", port=5000, use_reloader=False)

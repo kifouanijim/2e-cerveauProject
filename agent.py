@@ -20,6 +20,7 @@ from groq import Groq
 from tools import get_course, get_room, get_teacher, send_reminder, _load_courses
 from db_tools import count_students, get_team_project, find_student
 from weather_tool import get_weather
+from rag_tool import search_documentation
 
 load_dotenv()
 
@@ -35,6 +36,7 @@ TOOLS_BY_NAME = {
     "get_team_project": get_team_project,
     "find_student": find_student,
     "get_weather": get_weather,
+    "search_documentation": search_documentation,
 }
 
 # ---------------------------------------------------------------------------
@@ -42,11 +44,23 @@ TOOLS_BY_NAME = {
 # ---------------------------------------------------------------------------
 
 JSON_BRIDGE_PROMPT = """Tu es un assistant qui choisit un outil a appeler.
+Tu n’as accès qu’aux outils locaux du projet. Utilise uniquement ces outils. Ne réponds pas à partir de connaissances générales ou d’internet.
+Si l’information n’est pas présente dans les fichiers locaux du projet, réponds par une absence de donnée locale et ne tente pas de répondre à partir de connaissances externes.
+TU NE DOIS JAMAIS GÉNÉRER DE CONTENU LIBRE. Tu DOIS obligatoirement appeler un outil fourni ou refuser.
+
 Outils disponibles :
 - get_course(course_name)
 - get_room(course_name)
 - get_teacher(course_name)
 - send_reminder(message)
+- count_students() [sans arguments]
+- get_team_project(team)
+- find_student(name)
+- get_weather(day)
+- search_documentation(question)
+
+Si tu ne peux pas répondre avec un outil local, tu DOIS retourner cet objet JSON :
+{"tool": "none", "arguments": {}}
 
 Reponds UNIQUEMENT avec un objet JSON de cette forme, sans texte autour :
 {"tool": "nom_de_l_outil", "arguments": {"...": "..."}}
@@ -123,6 +137,48 @@ def _contains_any(text: str, keywords):
         if keyword in text:
             return True
     return False
+
+
+def _is_local_project_question(question: str) -> bool:
+    q = _normalize_text(question)
+
+    documentation_keywords = [
+        "git", "commit", "branche", "depot", "conflit", "api",
+        "documentation", "reglement", "pedagogique", "regles", "regle",
+        "endpoint", "route", "requete", "authentification", "token",
+        "evaluation", "examen", "absence", "retard", "sanction",
+    ]
+    
+    # Questions sur COMMENT FAIRE / procédures génériques -> REFUSÉES
+    if _contains_any(q, ["comment", "procedure", "etapes", "tuto", "guide", "exemple", "explique"]):
+        # Sauf si c'est clairement sur les infos du projet (salle, prof, horaire)
+        specific_keywords = [
+            "salle", "prof", "enseign", "horaire", "heure", "cours",
+            *documentation_keywords,
+        ]
+        if not any(kw in q for kw in specific_keywords):
+            return False
+    
+    local_keywords = [
+        "cours", "course", "salle", "professeur", "enseign",
+        "horaire", "heure", "rappel", "previens", "prevenir",
+        "hackathon", "etudiant", "etudiants", "participant", "participants",
+        "equipe", "team", "projet", "project", "meteo", "weather", "temps",
+        "temperature", "donne", "information", "informations"
+    ]
+    return any(keyword in q for keyword in [*local_keywords, *documentation_keywords])
+
+
+def _detect_documentation_question(q: str) -> bool:
+    return _contains_any(
+        q,
+        [
+            "git", "commit", "branche", "depot", "conflit", "api",
+            "documentation", "reglement", "pedagogique", "regles", "regle",
+            "endpoint", "route", "requete", "authentification", "token",
+            "evaluation", "examen", "absence", "retard", "sanction",
+        ],
+    )
 
 
 def _project_names_with_technology(technology: str):
@@ -207,8 +263,8 @@ def _simulate_llm_decision(question: str) -> dict:
                 if projects:
                     return {"tool": "get_team_project", "arguments": {"team": 1}}
                 break
-    # Default: ask for course info
-    return {"tool": "get_course", "arguments": {"course_name": "Docker"}}
+    # Default: refuse to answer if no local tool matches
+    return {"tool": "none", "arguments": {}}
 
 
 def _csv_fallback(question: str):
@@ -230,11 +286,20 @@ def _csv_fallback(question: str):
 
 
 def call_tool_from_json(decision: dict):
-    """Deja fourni : execute la fonction designee par `decision` avec ses
-    arguments. C'est le pont entre le JSON renvoye par le LLM et vos
-    fonctions Python de tools.py.
+    """Execute la fonction designee par `decision` avec ses arguments.
+    C'est le pont entre le JSON renvoye par le LLM et vos fonctions Python.
+    
+    Special case : si tool="none", retourne une indication de refus.
     """
-    tool_fn = TOOLS_BY_NAME[decision["tool"]]
+    tool_name = decision.get("tool", "none")
+    
+    if tool_name == "none":
+        return "Je n'ai pas cette information dans la base locale du projet."
+    
+    if tool_name not in TOOLS_BY_NAME:
+        return f"Outil inconnu : {tool_name}"
+    
+    tool_fn = TOOLS_BY_NAME[tool_name]
     return tool_fn(**decision["arguments"])
 
 
@@ -327,7 +392,7 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "get_weather",
-            "description": "Retourne une phrase décrivant la météo prévue à Paris pour un jour donné.",
+            "description": "Retourne une météo locale disponible dans le projet, sans appel Internet.",
             "parameters": {
                 "type": "object",
                 "properties": {"day": {"type": "string"}},
@@ -335,8 +400,18 @@ TOOLS_SCHEMA = [
             },
         },
     },
-    # TODO : ajoutez les schemas de get_room, get_teacher et send_reminder,
-    # sur le meme modele que get_course ci-dessus.
+    {
+        "type": "function",
+        "function": {
+            "name": "search_documentation",
+            "description": "Recherche un passage pertinent dans la documentation PDF locale.",
+            "parameters": {
+                "type": "object",
+                "properties": {"question": {"type": "string"}},
+                "required": ["question"],
+            },
+        },
+    },
 ]
 
 
@@ -357,6 +432,21 @@ def run_agent(question: str, max_steps: int = 5) -> str:
     5. Repetez depuis l'etape 2, jusqu'a max_steps tours maximum pour
        eviter une boucle infinie.
     """
+    if not _is_local_project_question(question):
+        return "Je n'ai pas cette information dans la base locale du projet. Je peux répondre uniquement aux questions sur les cours, le hackathon et les données disponibles localement."
+
+    # Documentation questions always use the local vector index directly.
+    # Compound questions also retain answers from the other local sources.
+    normalized_question = _normalize_text(question)
+    if _detect_documentation_question(normalized_question):
+        documentation_answer = search_documentation(question)
+        if _detect_student_count_question(normalized_question):
+            return (
+                f"Il y a {count_students()} étudiants qui participent.\n\n"
+                f"Documentation locale :\n{documentation_answer}"
+            )
+        return documentation_answer
+
     # If no Groq API key is present, or no model specified, run a deterministic
     # local flow based on the JSON bridge and the available `tools` (no
     # external model calls). The Groq Python SDK requires a `model` kwarg,
@@ -370,6 +460,9 @@ def run_agent(question: str, max_steps: int = 5) -> str:
         # Case 1: general local data should be checked before defaulting to course answers.
         # A single question may contain multiple requests (for example: count + weather).
         answers = []
+
+        if _detect_documentation_question(q):
+            return search_documentation(question)
 
         if _detect_student_count_question(q):
             answers.append(f"Il y a {count_students()} étudiants qui participent.")
