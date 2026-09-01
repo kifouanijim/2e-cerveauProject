@@ -22,7 +22,13 @@ def get_course(course_name: str):
     dictionnaire dont la clé "name" correspond à course_name (comparaison
     insensible à la casse). Renvoyez None si aucun cours ne correspond.
     """
-    raise NotImplementedError("À vous de jouer : Exercice 1")
+    courses = _load_courses()
+    target = course_name.strip().lower()
+    for course in courses:
+        name = course.get("name", "").strip().lower()
+        if name == target:
+            return course
+    return None
 
 
 def get_room(course_name: str):
@@ -30,7 +36,10 @@ def get_room(course_name: str):
 
     TODO : réutilisez get_course() plutôt que de relire le fichier JSON.
     """
-    raise NotImplementedError("À vous de jouer : Exercice 2")
+    course = get_course(course_name)
+    if course is None:
+        return None
+    return course.get("room")
 
 
 def get_teacher(course_name: str):
@@ -38,7 +47,10 @@ def get_teacher(course_name: str):
 
     TODO : même logique que get_room().
     """
-    raise NotImplementedError("À vous de jouer : Exercice 2")
+    course = get_course(course_name)
+    if course is None:
+        return None
+    return course.get("teacher")
 
 
 def send_reminder(message: str):
@@ -47,7 +59,8 @@ def send_reminder(message: str):
     TODO : affichez le message avec print(), puis renvoyez une chaîne de
     confirmation, par exemple "Notification envoyée."
     """
-    raise NotImplementedError("À vous de jouer : Exercice 2")
+    print(message)
+    return "Notification envoyée."
 
 
 if __name__ == "__main__":

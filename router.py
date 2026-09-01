@@ -16,9 +16,12 @@ def route(question: str):
     question = question.lower()
     if "salle" in question:
         return get_room
-    # TODO : ajoutez la condition pour "professeur" / "enseignant" -> get_teacher
-    # TODO : ajoutez la condition pour "horaire" / "heure" -> get_course
-    # TODO : ajoutez la condition pour "rappel" / "previens" -> send_reminder
+    if "professeur" in question or "enseign" in question:
+        return get_teacher
+    if "horaire" in question or "heure" in question:
+        return get_course
+    if "rappel" in question or "préviens" in question or "previens" in question:
+        return send_reminder
     return None
 
 
